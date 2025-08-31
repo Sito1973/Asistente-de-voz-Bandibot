@@ -43,16 +43,6 @@ async def index_page():
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     response = VoiceResponse()
-    # <Say> punctuation to improve text-to-speech flow
-    response.say(
-        "Please wait while we connect your call to the A. I. voice assistant, powered by Twilio and the Open A I Realtime API",
-        voice="Google.en-US-Chirp3-HD-Aoede"
-    )
-    response.pause(length=1)
-    response.say(   
-        "O.K. you can start talking!",
-        voice="Google.en-US-Chirp3-HD-Aoede"
-    )
     host = request.url.hostname
     connect = Connect()
     connect.stream(url=f'wss://{host}/media-stream')
