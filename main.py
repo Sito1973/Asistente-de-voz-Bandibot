@@ -103,7 +103,15 @@ async def index_page():
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
     # Get caller information from request
-    form_data = await request.form() if request.method == "POST" else request.query_params
+    try:
+        if request.method == "POST":
+            form_data = await request.form()
+        else:
+            form_data = request.query_params
+    except Exception as e:
+        print(f"Error parsing request data: {e}")
+        form_data = {}
+    
     caller_number = form_data.get('From', 'Unknown')
     called_number = form_data.get('To', 'Unknown')
     call_sid = form_data.get('CallSid', 'Unknown')
