@@ -348,8 +348,7 @@ async def handle_media_stream(websocket: WebSocket):
                 await connection.send_json(mark_event)
                 mark_queue.append('responsePart')
 
-        # Background task to send webhook when connection ends
-        async def send_webhook_on_close():
+            # Execute the main WebSocket communication
             try:
                 await asyncio.gather(receive_from_twilio(), send_to_twilio())
             except Exception as final_error:
@@ -378,8 +377,6 @@ async def handle_media_stream(websocket: WebSocket):
                 if call_sid and call_sid in call_info_store:
                     del call_info_store[call_sid]
                     print(f"Cleaned up call info for {call_sid}")
-        
-            await send_webhook_on_close()
     except Exception as main_error:
         print(f"Main error in media stream: {main_error}")
     finally:
