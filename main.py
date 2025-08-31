@@ -186,59 +186,59 @@ async def handle_media_stream(websocket: WebSocket):
             
             async def receive_from_twilio():
                 """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
-            nonlocal stream_sid, latest_media_timestamp
-            try:
-                async for message in websocket.iter_text():
-                    data = json.loads(message)
-                    if data['event'] == 'media' and openai_ws.state.name == 'OPEN':
-                        latest_media_timestamp = int(data['media']['timestamp'])
-                        audio_append = {
-                            "type": "input_audio_buffer.append",
-                            "audio": data['media']['payload']
-                        }
-                        await openai_ws.send(json.dumps(audio_append))
-                    elif data['event'] == 'start':
-                        stream_sid = data['start']['streamSid']
-                        print(f"Incoming stream has started {stream_sid}")
-                        
-                        # Extract CallSid from streamSid (format: MZ{callsid}{random})
-                        # StreamSid starts with "MZ" followed by CallSid
-                        if stream_sid.startswith('MZ'):
-                            # Try to match with stored call info
-                            potential_call_sid = None
-                            for stored_call_sid, info in call_info_store.items():
-                                if stream_sid.find(stored_call_sid.replace('CA', '')) != -1:
-                                    potential_call_sid = stored_call_sid
-                                    break
+                nonlocal stream_sid, latest_media_timestamp
+                try:
+                    async for message in websocket.iter_text():
+                        data = json.loads(message)
+                        if data['event'] == 'media' and openai_ws.state.name == 'OPEN':
+                            latest_media_timestamp = int(data['media']['timestamp'])
+                            audio_append = {
+                                "type": "input_audio_buffer.append",
+                                "audio": data['media']['payload']
+                            }
+                            await openai_ws.send(json.dumps(audio_append))
+                        elif data['event'] == 'start':
+                            stream_sid = data['start']['streamSid']
+                            print(f"Incoming stream has started {stream_sid}")
                             
-                            # If we can't match by substring, use the most recent call
-                            if not potential_call_sid and call_info_store:
-                                potential_call_sid = max(call_info_store.keys(), 
-                                                       key=lambda k: call_info_store[k]['timestamp'])
+                            # Extract CallSid from streamSid (format: MZ{callsid}{random})
+                            # StreamSid starts with "MZ" followed by CallSid
+                            if stream_sid.startswith('MZ'):
+                                # Try to match with stored call info
+                                potential_call_sid = None
+                                for stored_call_sid, info in call_info_store.items():
+                                    if stream_sid.find(stored_call_sid.replace('CA', '')) != -1:
+                                        potential_call_sid = stored_call_sid
+                                        break
+                                
+                                # If we can't match by substring, use the most recent call
+                                if not potential_call_sid and call_info_store:
+                                    potential_call_sid = max(call_info_store.keys(), 
+                                                           key=lambda k: call_info_store[k]['timestamp'])
+                                
+                                if potential_call_sid and potential_call_sid in call_info_store:
+                                    call_info = call_info_store[potential_call_sid]
+                                    caller_number = call_info['from_number']
+                                    called_number = call_info['to_number'] 
+                                    call_sid = call_info['call_sid']
+                                    print(f"Retrieved call info: from={caller_number}, to={called_number}, callsid={call_sid}")
+                                else:
+                                    print(f"Could not match stream {stream_sid} to any stored call info")
                             
-                            if potential_call_sid and potential_call_sid in call_info_store:
-                                call_info = call_info_store[potential_call_sid]
-                                caller_number = call_info['from_number']
-                                called_number = call_info['to_number'] 
-                                call_sid = call_info['call_sid']
-                                print(f"Retrieved call info: from={caller_number}, to={called_number}, callsid={call_sid}")
-                            else:
-                                print(f"Could not match stream {stream_sid} to any stored call info")
-                        
-                        response_start_timestamp_twilio = None
-                        latest_media_timestamp = 0
-                        last_assistant_item = None
-                    elif data['event'] == 'mark':
-                        if mark_queue:
-                            mark_queue.pop(0)
-            except WebSocketDisconnect:
-                print("Client disconnected via WebSocketDisconnect.")
-                if openai_ws.state.name == 'OPEN':
-                    await openai_ws.close()
-            except Exception as disconnect_error:
-                print(f"Client disconnected with error: {disconnect_error}")
-                if openai_ws.state.name == 'OPEN':
-                    await openai_ws.close()
+                            response_start_timestamp_twilio = None
+                            latest_media_timestamp = 0
+                            last_assistant_item = None
+                        elif data['event'] == 'mark':
+                            if mark_queue:
+                                mark_queue.pop(0)
+                except WebSocketDisconnect:
+                    print("Client disconnected via WebSocketDisconnect.")
+                    if openai_ws.state.name == 'OPEN':
+                        await openai_ws.close()
+                except Exception as disconnect_error:
+                    print(f"Client disconnected with error: {disconnect_error}")
+                    if openai_ws.state.name == 'OPEN':
+                        await openai_ws.close()
 
         async def send_to_twilio():
             """Receive events from the OpenAI Realtime API, send audio back to Twilio."""
