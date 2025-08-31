@@ -16,10 +16,10 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
+ENV PORT=5050
 
 # Expose port for Easypanel
-EXPOSE 8080
+EXPOSE 5050
 
 # Run the application
 CMD ["python", "main.py"]
