@@ -131,7 +131,11 @@ async def handle_incoming_call(request: Request):
     encoded_from = quote(str(caller_number))
     encoded_to = quote(str(called_number))
     encoded_callsid = quote(str(call_sid))
-    connect.stream(url=f'wss://{host}/media-stream?from={encoded_from}&to={encoded_to}&callsid={encoded_callsid}')
+    
+    websocket_url = f'wss://{host}/media-stream?from={encoded_from}&to={encoded_to}&callsid={encoded_callsid}'
+    print(f"WebSocket URL being sent to Twilio: {websocket_url}")
+    
+    connect.stream(url=websocket_url)
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -140,6 +144,11 @@ async def handle_media_stream(websocket: WebSocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
     print("Client connected")
     await websocket.accept()
+    
+    # Add disconnect handler
+    @websocket.on_disconnect
+    async def on_disconnect():
+        print("WebSocket disconnected - handler triggered")
     
     # Extract caller info from query parameters
     query_params = dict(websocket.query_params)
@@ -329,21 +338,33 @@ async def handle_media_stream(websocket: WebSocket):
                 await connection.send_json(mark_event)
                 mark_queue.append('responsePart')
 
-        try:
-            await asyncio.gather(receive_from_twilio(), send_to_twilio())
-        except Exception as final_error:
-            print(f"Final exception in media stream: {final_error}")
-        finally:
-            # Ensure usage data is sent even if connection ends normally
-            print(f"Connection ended. Conversation ID: {conversation_id}, Total tokens: {total_usage.get('total_tokens', 0)}")
-            print(f"Final usage data: {total_usage}")
-            if conversation_id and total_usage.get('total_tokens', 0) > 0:
-                total_cost = calculate_cost(total_usage)
-                print(f"Sending final usage data to webhook: Cost ${total_cost}")
-                await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
-            else:
-                print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
-                print(f"Reason: {'No conversation_id' if not conversation_id else 'No tokens used'}")
+        # Background task to send webhook when connection ends
+        async def send_webhook_on_close():
+            try:
+                await asyncio.gather(receive_from_twilio(), send_to_twilio())
+            except Exception as final_error:
+                print(f"Final exception in media stream: {final_error}")
+            finally:
+                # Always execute this block
+                print("=== WEBHOOK SEND BLOCK EXECUTING ===")
+                print(f"Connection ended. Conversation ID: {conversation_id}, Total tokens: {total_usage.get('total_tokens', 0)}")
+                print(f"Final usage data: {total_usage}")
+                print(f"Caller info: {caller_number}, {called_number}, {call_sid}")
+                
+                if conversation_id and total_usage.get('total_tokens', 0) > 0:
+                    total_cost = calculate_cost(total_usage)
+                    print(f"Sending final usage data to webhook: Cost ${total_cost}")
+                    try:
+                        await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
+                        print("Webhook sent successfully!")
+                    except Exception as webhook_error:
+                        print(f"Webhook send error: {webhook_error}")
+                else:
+                    print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
+                    print(f"Reason: {'No conversation_id' if not conversation_id else 'No tokens used'}")
+                print("=== WEBHOOK SEND BLOCK COMPLETED ===")
+        
+        await send_webhook_on_close()
 
 async def send_initial_conversation_item(openai_ws):
     """Send initial conversation item if AI talks first."""
