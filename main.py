@@ -146,13 +146,28 @@ async def handle_media_stream(websocket: WebSocket):
     await websocket.accept()
     
     # Extract caller info from query parameters
-    query_params = dict(websocket.query_params)
-    caller_number = query_params.get('from', 'Unknown')
-    called_number = query_params.get('to', 'Unknown')
-    call_sid = query_params.get('callsid', 'Unknown')
+    print(f"Raw WebSocket scope: {websocket.scope}")
+    query_string = websocket.scope.get('query_string', b'').decode('utf-8')
+    print(f"Raw query string: {query_string}")
     
-    print(f"Query params received: {query_params}")
-    print(f"Parsed caller info: from={caller_number}, to={called_number}, callsid={call_sid}")
+    query_params = dict(websocket.query_params)
+    print(f"FastAPI query params: {query_params}")
+    
+    # Parse manually from query string if FastAPI parsing fails
+    caller_number = 'Unknown'
+    called_number = 'Unknown' 
+    call_sid = 'Unknown'
+    
+    if query_string:
+        from urllib.parse import parse_qs, unquote
+        parsed = parse_qs(query_string)
+        print(f"Manual parsed params: {parsed}")
+        
+        caller_number = unquote(parsed.get('from', ['Unknown'])[0])
+        called_number = unquote(parsed.get('to', ['Unknown'])[0])
+        call_sid = unquote(parsed.get('callsid', ['Unknown'])[0])
+    
+    print(f"Final caller info: from={caller_number}, to={called_number}, callsid={call_sid}")
     
     print(f"WebSocket connection established for call from {caller_number} to {called_number}")
 
@@ -203,22 +218,10 @@ async def handle_media_stream(websocket: WebSocket):
                             mark_queue.pop(0)
             except WebSocketDisconnect:
                 print("Client disconnected via WebSocketDisconnect.")
-                # Send final usage data to webhook before closing
-                print(f"Disconnect: conversation_id={conversation_id}, tokens={total_usage.get('total_tokens', 0)}")
-                if conversation_id and total_usage['total_tokens'] > 0:
-                    total_cost = calculate_cost(total_usage)
-                    print(f"Sending webhook on disconnect: {caller_number}, {called_number}, {call_sid}")
-                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
                 if openai_ws.state.name == 'OPEN':
                     await openai_ws.close()
             except Exception as disconnect_error:
                 print(f"Client disconnected with error: {disconnect_error}")
-                # Send final usage data to webhook before closing
-                print(f"Error disconnect: conversation_id={conversation_id}, tokens={total_usage.get('total_tokens', 0)}")
-                if conversation_id and total_usage['total_tokens'] > 0:
-                    total_cost = calculate_cost(total_usage)
-                    print(f"Sending webhook on error disconnect: {caller_number}, {called_number}, {call_sid}")
-                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
                 if openai_ws.state.name == 'OPEN':
                     await openai_ws.close()
 
@@ -288,10 +291,7 @@ async def handle_media_stream(websocket: WebSocket):
                             await handle_speech_started_event()
             except Exception as e:
                 print(f"Error in send_to_twilio: {e}")
-                # Send final usage data to webhook on error
-                if conversation_id and total_usage['total_tokens'] > 0:
-                    total_cost = calculate_cost(total_usage)
-                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
+                # Don't send webhook here, will be sent in finally block
 
         async def handle_speech_started_event():
             """Handle interruption when the caller's speech starts."""
