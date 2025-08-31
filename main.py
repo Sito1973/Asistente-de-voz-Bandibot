@@ -88,12 +88,17 @@ async def send_usage_to_webhook(usage_data, total_cost, conversation_id, caller_
             }
         }
         
+        print(f"Sending webhook to: {N8N_WEBHOOK_URL}")
+        print(f"Payload: {payload}")
+        
         response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
         response.raise_for_status()
-        print(f"Usage data sent to webhook successfully. Cost: ${total_cost}")
+        print(f"Usage data sent to webhook successfully. Status: {response.status_code}, Cost: ${total_cost}")
         
     except Exception as e:
         print(f"Error sending usage data to webhook: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.get("/", response_class=JSONResponse)
 async def index_page():
@@ -212,6 +217,7 @@ async def handle_media_stream(websocket: WebSocket):
                         # Accumulate usage data
                         usage = response_data.get('usage', {})
                         if usage:
+                            print(f"Accumulating usage data: {usage}")
                             total_usage['total_tokens'] += usage.get('total_tokens', 0)
                             total_usage['input_tokens'] += usage.get('input_tokens', 0)
                             total_usage['output_tokens'] += usage.get('output_tokens', 0)
@@ -308,9 +314,13 @@ async def handle_media_stream(websocket: WebSocket):
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
         finally:
             # Ensure usage data is sent even if connection ends normally
+            print(f"Connection ended. Conversation ID: {conversation_id}, Total tokens: {total_usage.get('total_tokens', 0)}")
             if conversation_id and total_usage['total_tokens'] > 0:
                 total_cost = calculate_cost(total_usage)
+                print(f"Sending final usage data: {total_usage}")
                 await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
+            else:
+                print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
 
 async def send_initial_conversation_item(openai_ws):
     """Send initial conversation item if AI talks first."""
