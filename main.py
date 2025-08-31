@@ -142,10 +142,13 @@ async def handle_media_stream(websocket: WebSocket):
     await websocket.accept()
     
     # Extract caller info from query parameters
-    query_params = websocket.query_params
+    query_params = dict(websocket.query_params)
     caller_number = query_params.get('from', 'Unknown')
     called_number = query_params.get('to', 'Unknown')
     call_sid = query_params.get('callsid', 'Unknown')
+    
+    print(f"Query params received: {query_params}")
+    print(f"Parsed caller info: from={caller_number}, to={called_number}, callsid={call_sid}")
     
     print(f"WebSocket connection established for call from {caller_number} to {called_number}")
 
@@ -328,15 +331,19 @@ async def handle_media_stream(websocket: WebSocket):
 
         try:
             await asyncio.gather(receive_from_twilio(), send_to_twilio())
+        except Exception as final_error:
+            print(f"Final exception in media stream: {final_error}")
         finally:
             # Ensure usage data is sent even if connection ends normally
             print(f"Connection ended. Conversation ID: {conversation_id}, Total tokens: {total_usage.get('total_tokens', 0)}")
-            if conversation_id and total_usage['total_tokens'] > 0:
+            print(f"Final usage data: {total_usage}")
+            if conversation_id and total_usage.get('total_tokens', 0) > 0:
                 total_cost = calculate_cost(total_usage)
-                print(f"Sending final usage data: {total_usage}")
+                print(f"Sending final usage data to webhook: Cost ${total_cost}")
                 await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
             else:
                 print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
+                print(f"Reason: {'No conversation_id' if not conversation_id else 'No tokens used'}")
 
 async def send_initial_conversation_item(openai_ws):
     """Send initial conversation item if AI talks first."""
@@ -371,12 +378,14 @@ async def initialize_session(openai_ws):
                     "turn_detection": {"type": "server_vad"}
                 },
                 "output": {
-                    "format": {"type": "audio/pcmu"}
+                    "format": {"type": "audio/pcmu"},
+                    "voice": VOICE
                 }
             },
             "instructions": SYSTEM_MESSAGE,
         }
     }
+    print(f'Using voice: {VOICE}')
     print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
 
