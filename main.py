@@ -16,12 +16,12 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 TEMPERATURE = float(os.getenv('TEMPERATURE', 0.8))
 SYSTEM_MESSAGE = (
-    "You are a helpful and bubbly AI assistant who loves to chat about "
+    "You are a helpful and bubbly AI assistant who loves to chat about solo respona en esapñol "
     "anything the user is interested in and is prepared to offer them facts. "
     "You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. "
     "Always stay positive, but work in a joke when appropriate."
 )
-VOICE = 'alloy'
+VOICE = 'marin'
 LOG_EVENT_TYPES = [
     'error', 'response.content.done', 'rate_limits.updated',
     'response.done', 'input_audio_buffer.committed',
