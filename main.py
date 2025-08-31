@@ -21,7 +21,7 @@ SYSTEM_MESSAGE = (
     "You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. "
     "Always stay positive, but work in a joke when appropriate."
 )
-VOICE = 'marin'
+VOICE = 'cedar'
 LOG_EVENT_TYPES = [
     'error', 'response.content.done', 'rate_limits.updated',
     'response.done', 'input_audio_buffer.committed',
@@ -187,7 +187,7 @@ async def send_initial_conversation_item(openai_ws):
             "content": [
                 {
                     "type": "input_text",
-                    "text": "hola, le hablamos de bandidos como te podemos colaborar?",
+                    "text": "hola"
                 }
             ]
         }
