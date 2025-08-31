@@ -176,16 +176,20 @@ async def handle_media_stream(websocket: WebSocket):
     }
     
     try:
+        print("Attempting to connect to OpenAI...")
         async with websockets.connect(
             f"wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature={TEMPERATURE}&voice={VOICE}",
             additional_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}"
             }
         ) as openai_ws:
+            print("Connected to OpenAI successfully!")
             await initialize_session(openai_ws)
+            print("Session initialized, starting communication tasks...")
             
             async def receive_from_twilio():
                 """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
+                print("receive_from_twilio: Starting...")
                 nonlocal stream_sid, latest_media_timestamp
                 try:
                     async for message in websocket.iter_text():
@@ -242,6 +246,7 @@ async def handle_media_stream(websocket: WebSocket):
 
         async def send_to_twilio():
             """Receive events from the OpenAI Realtime API, send audio back to Twilio."""
+            print("send_to_twilio: Starting...")
             nonlocal stream_sid, last_assistant_item, response_start_timestamp_twilio, conversation_id, total_usage
             try:
                 async for openai_message in openai_ws:
@@ -349,10 +354,14 @@ async def handle_media_stream(websocket: WebSocket):
                 mark_queue.append('responsePart')
 
             # Execute the main WebSocket communication
+            print("Starting receive_from_twilio and send_to_twilio tasks...")
             try:
                 await asyncio.gather(receive_from_twilio(), send_to_twilio())
+                print("Both communication tasks completed")
             except Exception as final_error:
                 print(f"Final exception in media stream: {final_error}")
+                import traceback
+                traceback.print_exc()
             finally:
                 # Always execute this block
                 print("=== WEBHOOK SEND BLOCK EXECUTING ===")
