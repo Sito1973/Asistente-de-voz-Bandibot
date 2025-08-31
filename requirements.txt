@@ -31,3 +31,4 @@ uvicorn==0.35.0
 websockets==15.0.1
 yarl==1.20.1
 python-multipart==0.0.6
+openai==1.102.0
