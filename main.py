@@ -40,6 +40,9 @@ PRICING = {
     "audio": {"input": 32.00, "cached": 0.40, "output": 64.00}
 }
 
+# Store call information by CallSid
+call_info_store = {}
+
 app = FastAPI()
 
 if not OPENAI_API_KEY:
@@ -123,16 +126,21 @@ async def handle_incoming_call(request: Request):
     
     print(f"Incoming call from {caller_number} to {called_number}, CallSid: {call_sid}")
     
+    # Store call info in memory by CallSid
+    call_info_store[call_sid] = {
+        "from_number": caller_number,
+        "to_number": called_number,
+        "call_sid": call_sid,
+        "timestamp": asyncio.get_event_loop().time()
+    }
+    print(f"Stored call info for {call_sid}: {call_info_store[call_sid]}")
+    
     response = VoiceResponse()
     host = request.url.hostname
     connect = Connect()
-    # Pass caller info as URL parameters (URL encode them)
-    from urllib.parse import quote
-    encoded_from = quote(str(caller_number))
-    encoded_to = quote(str(called_number))
-    encoded_callsid = quote(str(call_sid))
     
-    websocket_url = f'wss://{host}/media-stream?from={encoded_from}&to={encoded_to}&callsid={encoded_callsid}'
+    # Use simple WebSocket URL since query params don't work with Twilio
+    websocket_url = f'wss://{host}/media-stream'
     print(f"WebSocket URL being sent to Twilio: {websocket_url}")
     
     connect.stream(url=websocket_url)
@@ -145,31 +153,12 @@ async def handle_media_stream(websocket: WebSocket):
     print("Client connected")
     await websocket.accept()
     
-    # Extract caller info from query parameters
-    print(f"Raw WebSocket scope: {websocket.scope}")
-    query_string = websocket.scope.get('query_string', b'').decode('utf-8')
-    print(f"Raw query string: {query_string}")
-    
-    query_params = dict(websocket.query_params)
-    print(f"FastAPI query params: {query_params}")
-    
-    # Parse manually from query string if FastAPI parsing fails
+    # Initialize with Unknown values - will be updated when stream starts
     caller_number = 'Unknown'
     called_number = 'Unknown' 
     call_sid = 'Unknown'
     
-    if query_string:
-        from urllib.parse import parse_qs, unquote
-        parsed = parse_qs(query_string)
-        print(f"Manual parsed params: {parsed}")
-        
-        caller_number = unquote(parsed.get('from', ['Unknown'])[0])
-        called_number = unquote(parsed.get('to', ['Unknown'])[0])
-        call_sid = unquote(parsed.get('callsid', ['Unknown'])[0])
-    
-    print(f"Final caller info: from={caller_number}, to={called_number}, callsid={call_sid}")
-    
-    print(f"WebSocket connection established for call from {caller_number} to {called_number}")
+    print("WebSocket connection established - waiting for stream start to get call info")
 
     async with websockets.connect(
         f"wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature={TEMPERATURE}&voice={VOICE}",
@@ -210,6 +199,31 @@ async def handle_media_stream(websocket: WebSocket):
                     elif data['event'] == 'start':
                         stream_sid = data['start']['streamSid']
                         print(f"Incoming stream has started {stream_sid}")
+                        
+                        # Extract CallSid from streamSid (format: MZ{callsid}{random})
+                        # StreamSid starts with "MZ" followed by CallSid
+                        if stream_sid.startswith('MZ'):
+                            # Try to match with stored call info
+                            potential_call_sid = None
+                            for stored_call_sid, info in call_info_store.items():
+                                if stream_sid.find(stored_call_sid.replace('CA', '')) != -1:
+                                    potential_call_sid = stored_call_sid
+                                    break
+                            
+                            # If we can't match by substring, use the most recent call
+                            if not potential_call_sid and call_info_store:
+                                potential_call_sid = max(call_info_store.keys(), 
+                                                       key=lambda k: call_info_store[k]['timestamp'])
+                            
+                            if potential_call_sid and potential_call_sid in call_info_store:
+                                call_info = call_info_store[potential_call_sid]
+                                caller_number = call_info['from_number']
+                                called_number = call_info['to_number'] 
+                                call_sid = call_info['call_sid']
+                                print(f"Retrieved call info: from={caller_number}, to={called_number}, callsid={call_sid}")
+                            else:
+                                print(f"Could not match stream {stream_sid} to any stored call info")
+                        
                         response_start_timestamp_twilio = None
                         latest_media_timestamp = 0
                         last_assistant_item = None
@@ -358,6 +372,11 @@ async def handle_media_stream(websocket: WebSocket):
                     print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
                     print(f"Reason: {'No conversation_id' if not conversation_id else 'No tokens used'}")
                 print("=== WEBHOOK SEND BLOCK COMPLETED ===")
+                
+                # Clean up call info from store
+                if call_sid and call_sid in call_info_store:
+                    del call_info_store[call_sid]
+                    print(f"Cleaned up call info for {call_sid}")
         
         await send_webhook_on_close()
 
