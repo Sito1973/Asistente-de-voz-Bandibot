@@ -126,8 +126,12 @@ async def handle_incoming_call(request: Request):
     response = VoiceResponse()
     host = request.url.hostname
     connect = Connect()
-    # Pass caller info as URL parameters
-    connect.stream(url=f'wss://{host}/media-stream?from={caller_number}&to={called_number}&callsid={call_sid}')
+    # Pass caller info as URL parameters (URL encode them)
+    from urllib.parse import quote
+    encoded_from = quote(str(caller_number))
+    encoded_to = quote(str(called_number))
+    encoded_callsid = quote(str(call_sid))
+    connect.stream(url=f'wss://{host}/media-stream?from={encoded_from}&to={encoded_to}&callsid={encoded_callsid}')
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -191,10 +195,22 @@ async def handle_media_stream(websocket: WebSocket):
                         if mark_queue:
                             mark_queue.pop(0)
             except WebSocketDisconnect:
-                print("Client disconnected.")
+                print("Client disconnected via WebSocketDisconnect.")
                 # Send final usage data to webhook before closing
+                print(f"Disconnect: conversation_id={conversation_id}, tokens={total_usage.get('total_tokens', 0)}")
                 if conversation_id and total_usage['total_tokens'] > 0:
                     total_cost = calculate_cost(total_usage)
+                    print(f"Sending webhook on disconnect: {caller_number}, {called_number}, {call_sid}")
+                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
+                if openai_ws.state.name == 'OPEN':
+                    await openai_ws.close()
+            except Exception as disconnect_error:
+                print(f"Client disconnected with error: {disconnect_error}")
+                # Send final usage data to webhook before closing
+                print(f"Error disconnect: conversation_id={conversation_id}, tokens={total_usage.get('total_tokens', 0)}")
+                if conversation_id and total_usage['total_tokens'] > 0:
+                    total_cost = calculate_cost(total_usage)
+                    print(f"Sending webhook on error disconnect: {caller_number}, {called_number}, {call_sid}")
                     await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
                 if openai_ws.state.name == 'OPEN':
                     await openai_ws.close()
