@@ -160,31 +160,32 @@ async def handle_media_stream(websocket: WebSocket):
     
     print("WebSocket connection established - waiting for stream start to get call info")
 
-    async with websockets.connect(
-        f"wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature={TEMPERATURE}&voice={VOICE}",
-        additional_headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
-        }
-    ) as openai_ws:
-        await initialize_session(openai_ws)
-
-        # Connection specific state
-        stream_sid = None
-        latest_media_timestamp = 0
-        last_assistant_item = None
-        mark_queue = []
-        response_start_timestamp_twilio = None
-        conversation_id = None
-        total_usage = {
-            'total_tokens': 0,
-            'input_tokens': 0,
-            'output_tokens': 0,
-            'input_token_details': {'text_tokens': 0, 'audio_tokens': 0, 'cached_tokens': 0, 'cached_tokens_details': {'text_tokens': 0, 'audio_tokens': 0}},
-            'output_token_details': {'text_tokens': 0, 'audio_tokens': 0}
-        }
-        
-        async def receive_from_twilio():
-            """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
+    # Connection specific state
+    stream_sid = None
+    latest_media_timestamp = 0
+    last_assistant_item = None
+    mark_queue = []
+    response_start_timestamp_twilio = None
+    conversation_id = None
+    total_usage = {
+        'total_tokens': 0,
+        'input_tokens': 0,
+        'output_tokens': 0,
+        'input_token_details': {'text_tokens': 0, 'audio_tokens': 0, 'cached_tokens': 0, 'cached_tokens_details': {'text_tokens': 0, 'audio_tokens': 0}},
+        'output_token_details': {'text_tokens': 0, 'audio_tokens': 0}
+    }
+    
+    try:
+        async with websockets.connect(
+            f"wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature={TEMPERATURE}&voice={VOICE}",
+            additional_headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            }
+        ) as openai_ws:
+            await initialize_session(openai_ws)
+            
+            async def receive_from_twilio():
+                """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
             nonlocal stream_sid, latest_media_timestamp
             try:
                 async for message in websocket.iter_text():
@@ -378,7 +379,15 @@ async def handle_media_stream(websocket: WebSocket):
                     del call_info_store[call_sid]
                     print(f"Cleaned up call info for {call_sid}")
         
-        await send_webhook_on_close()
+            await send_webhook_on_close()
+    except Exception as main_error:
+        print(f"Main error in media stream: {main_error}")
+    finally:
+        print("=== WEBSOCKET FINALLY BLOCK ===")
+        print(f"conversation_id: {conversation_id}")
+        print(f"total_usage: {total_usage}")
+        print(f"call info: {caller_number}, {called_number}, {call_sid}")
+        print("WebSocket handler finished")
 
 async def send_initial_conversation_item(openai_ws):
     """Send initial conversation item if AI talks first."""
