@@ -343,15 +343,15 @@ async def handle_media_stream(websocket: WebSocket):
                 last_assistant_item = None
                 response_start_timestamp_twilio = None
 
-        async def send_mark(connection, stream_sid):
-            if stream_sid:
-                mark_event = {
-                    "event": "mark",
-                    "streamSid": stream_sid,
-                    "mark": {"name": "responsePart"}
-                }
-                await connection.send_json(mark_event)
-                mark_queue.append('responsePart')
+            async def send_mark(connection, stream_sid):
+                if stream_sid:
+                    mark_event = {
+                        "event": "mark",
+                        "streamSid": stream_sid,
+                        "mark": {"name": "responsePart"}
+                    }
+                    await connection.send_json(mark_event)
+                    mark_queue.append('responsePart')
 
             # Execute the main WebSocket communication
             print("Starting receive_from_twilio and send_to_twilio tasks...")
