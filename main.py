@@ -145,11 +145,6 @@ async def handle_media_stream(websocket: WebSocket):
     print("Client connected")
     await websocket.accept()
     
-    # Add disconnect handler
-    @websocket.on_disconnect
-    async def on_disconnect():
-        print("WebSocket disconnected - handler triggered")
-    
     # Extract caller info from query parameters
     query_params = dict(websocket.query_params)
     caller_number = query_params.get('from', 'Unknown')
