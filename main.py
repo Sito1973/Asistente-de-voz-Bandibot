@@ -72,7 +72,7 @@ def calculate_cost(usage_data):
     
     return round(total_cost, 6)
 
-async def send_usage_to_webhook(usage_data, total_cost, conversation_id):
+async def send_usage_to_webhook(usage_data, total_cost, conversation_id, caller_number=None, called_number=None, call_sid=None):
     """Send usage data and cost to N8N webhook."""
     try:
         payload = {
@@ -80,7 +80,12 @@ async def send_usage_to_webhook(usage_data, total_cost, conversation_id):
             "usage": usage_data,
             "total_cost_usd": total_cost,
             "timestamp": asyncio.get_event_loop().time(),
-            "pricing_model": PRICING
+            "pricing_model": PRICING,
+            "call_info": {
+                "from_number": caller_number,
+                "to_number": called_number,
+                "call_sid": call_sid
+            }
         }
         
         response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
@@ -97,10 +102,19 @@ async def index_page():
 @app.api_route("/incoming-call", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
+    # Get caller information from request
+    form_data = await request.form() if request.method == "POST" else request.query_params
+    caller_number = form_data.get('From', 'Unknown')
+    called_number = form_data.get('To', 'Unknown')
+    call_sid = form_data.get('CallSid', 'Unknown')
+    
+    print(f"Incoming call from {caller_number} to {called_number}, CallSid: {call_sid}")
+    
     response = VoiceResponse()
     host = request.url.hostname
     connect = Connect()
-    connect.stream(url=f'wss://{host}/media-stream')
+    # Pass caller info as URL parameters
+    connect.stream(url=f'wss://{host}/media-stream?from={caller_number}&to={called_number}&callsid={call_sid}')
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -109,6 +123,14 @@ async def handle_media_stream(websocket: WebSocket):
     """Handle WebSocket connections between Twilio and OpenAI."""
     print("Client connected")
     await websocket.accept()
+    
+    # Extract caller info from query parameters
+    query_params = websocket.query_params
+    caller_number = query_params.get('from', 'Unknown')
+    called_number = query_params.get('to', 'Unknown')
+    call_sid = query_params.get('callsid', 'Unknown')
+    
+    print(f"WebSocket connection established for call from {caller_number} to {called_number}")
 
     async with websockets.connect(
         f"wss://api.openai.com/v1/realtime?model=gpt-realtime&temperature={TEMPERATURE}&voice={VOICE}",
@@ -160,7 +182,7 @@ async def handle_media_stream(websocket: WebSocket):
                 # Send final usage data to webhook before closing
                 if conversation_id and total_usage['total_tokens'] > 0:
                     total_cost = calculate_cost(total_usage)
-                    await send_usage_to_webhook(total_usage, total_cost, conversation_id)
+                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
                 if openai_ws.state.name == 'OPEN':
                     await openai_ws.close()
 
@@ -232,7 +254,7 @@ async def handle_media_stream(websocket: WebSocket):
                 # Send final usage data to webhook on error
                 if conversation_id and total_usage['total_tokens'] > 0:
                     total_cost = calculate_cost(total_usage)
-                    await send_usage_to_webhook(total_usage, total_cost, conversation_id)
+                    await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
 
         async def handle_speech_started_event():
             """Handle interruption when the caller's speech starts."""
@@ -280,7 +302,7 @@ async def handle_media_stream(websocket: WebSocket):
             # Ensure usage data is sent even if connection ends normally
             if conversation_id and total_usage['total_tokens'] > 0:
                 total_cost = calculate_cost(total_usage)
-                await send_usage_to_webhook(total_usage, total_cost, conversation_id)
+                await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
 
 async def send_initial_conversation_item(openai_ws):
     """Send initial conversation item if AI talks first."""
