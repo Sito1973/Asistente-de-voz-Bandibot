@@ -207,6 +207,7 @@ async def handle_media_stream(websocket: WebSocket):
     mark_queue = []
     response_start_timestamp_twilio = None
     conversation_id = None
+    webhook_dispatched = False
     total_usage = {
         'total_tokens': 0,
         'input_tokens': 0,
@@ -401,7 +402,7 @@ async def handle_media_stream(websocket: WebSocket):
                 traceback.print_exc()
             finally:
                 # Always execute this block
-                print("=== WEBHOOK SEND BLOCK EXECUTING ===")
+                print("=== WEBHOOK SEND BLOCK EXECUTING ===", flush=True)
                 print(f"Connection ended. Conversation ID: {conversation_id}, Total tokens: {total_usage.get('total_tokens', 0)}")
                 print(f"Final usage data: {total_usage}")
                 print(f"Caller info: {caller_number}, {called_number}, {call_sid}")
@@ -421,7 +422,7 @@ async def handle_media_stream(websocket: WebSocket):
                 print(
                     f"Dispatching webhook with status={status}. "
                     f"Conversation ID: {final_conversation_id}, Tokens: {tokens}, Cost: ${total_cost}"
-                )
+                , flush=True)
                 try:
                     await send_usage_to_webhook(
                         total_usage,
@@ -433,7 +434,8 @@ async def handle_media_stream(websocket: WebSocket):
                         status=status,
                         reason=reason_text,
                     )
-                    print("Webhook dispatch finished (check status above).")
+                    webhook_dispatched = True
+                    print("Webhook dispatch finished (check status above).", flush=True)
                 except Exception as webhook_error:
                     print(f"Webhook send error: {webhook_error}")
                 print("=== WEBHOOK SEND BLOCK COMPLETED ===")
@@ -445,10 +447,39 @@ async def handle_media_stream(websocket: WebSocket):
     except Exception as main_error:
         print(f"Main error in media stream: {main_error}")
     finally:
-        print("=== WEBSOCKET FINALLY BLOCK ===")
+        print("=== WEBSOCKET FINALLY BLOCK ===", flush=True)
         print(f"conversation_id: {conversation_id}")
         print(f"total_usage: {total_usage}")
         print(f"call info: {caller_number}, {called_number}, {call_sid}")
+        if not webhook_dispatched:
+            try:
+                tokens = total_usage.get('total_tokens', 0)
+                total_cost = calculate_cost(total_usage) if tokens > 0 else 0.0
+                final_conversation_id = conversation_id or call_sid or 'unknown'
+                status = "complete" if (conversation_id and tokens > 0) else "incomplete"
+                reasons = []
+                if not conversation_id:
+                    reasons.append("no_conversation_id")
+                if tokens == 0:
+                    reasons.append("no_tokens_used")
+                reason_text = ",".join(reasons) if reasons else None
+                print(
+                    f"[Fallback] Dispatching webhook with status={status}. "
+                    f"Conversation ID: {final_conversation_id}, Tokens: {tokens}, Cost: ${total_cost}",
+                    flush=True,
+                )
+                await send_usage_to_webhook(
+                    total_usage,
+                    total_cost,
+                    final_conversation_id,
+                    caller_number,
+                    called_number,
+                    call_sid,
+                    status=status,
+                    reason=reason_text,
+                )
+            except Exception as e:
+                print(f"[Fallback] Webhook send failed: {e}")
         print("WebSocket handler finished")
 
 async def send_initial_conversation_item(openai_ws):
