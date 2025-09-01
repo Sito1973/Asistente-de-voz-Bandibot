@@ -12,12 +12,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def load_system_message():
-    """Load system message from text file."""
+def load_system_message(caller_number=None):
+    """Load system message from text file and replace placeholders."""
     try:
         system_message_path = os.path.join(os.path.dirname(__file__), 'prompt', 'system mesage bandibot.txt')
         with open(system_message_path, 'r', encoding='utf-8') as file:
-            return file.read().strip()
+            content = file.read().strip()
+            
+        # Replace placeholders
+        if caller_number:
+            content = content.replace('{{caller_number}}', caller_number)
+            
+        return content
     except FileNotFoundError:
         print(f"Warning: System message file not found at {system_message_path}")
         return "You are a helpful AI assistant."
@@ -30,7 +36,6 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 TEMPERATURE = float(os.getenv('TEMPERATURE', 0.8))
 VOICE = os.getenv('VOICE', 'cedar')
-SYSTEM_MESSAGE = load_system_message()
 LOG_EVENT_TYPES = [
     'error', 'response.content.done', 'rate_limits.updated',
     'response.done', 'input_audio_buffer.committed',
@@ -192,7 +197,7 @@ async def handle_media_stream(websocket: WebSocket):
             }
         ) as openai_ws:
             print("Connected to OpenAI successfully!")
-            await initialize_session(openai_ws)
+            await initialize_session(openai_ws, caller_number)
             print("Session initialized, starting communication tasks...")
             
             async def receive_from_twilio():
@@ -419,8 +424,11 @@ async def send_initial_conversation_item(openai_ws):
     await openai_ws.send(json.dumps({"type": "response.create"}))
 
 
-async def initialize_session(openai_ws):
+async def initialize_session(openai_ws, caller_number=None):
     """Control initial session with OpenAI."""
+    # Load system message with caller number
+    system_message_with_caller = load_system_message(caller_number)
+    
     session_update = {
         "type": "session.update",
         "session": {
@@ -437,7 +445,7 @@ async def initialize_session(openai_ws):
                     "voice": VOICE
                 }
             },
-            "instructions": SYSTEM_MESSAGE,
+            "instructions": system_message_with_caller,
         }
     }
     print(f'Using voice: {VOICE}')
