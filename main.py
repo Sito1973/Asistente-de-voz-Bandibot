@@ -15,6 +15,18 @@ from datetime import datetime, timezone
 
 load_dotenv()
 
+def _format_phone_for_prompt(number: str, country_code: str = '57') -> str:
+    """Return local phone without leading country code (e.g., +57).
+    Keeps only digits; strips leading country code if length suggests E.164.
+    """
+    if not number:
+        return ''
+    digits = ''.join(ch for ch in str(number) if ch.isdigit())
+    # If it looks like E.164 with country code, strip it
+    if digits.startswith(country_code) and len(digits) > 10:
+        digits = digits[len(country_code):]
+    return digits
+
 def load_system_message(caller_number=None):
     """Load system message from text file and replace placeholders."""
     try:
@@ -22,10 +34,12 @@ def load_system_message(caller_number=None):
         with open(system_message_path, 'r', encoding='utf-8') as file:
             content = file.read().strip()
             
-        # Replace placeholders
+        # Replace placeholders (inject local number without +57)
         if caller_number:
-            content = content.replace('{{caller_number}}', caller_number)
-            content = content.replace('{{system__caller_id}}', caller_number)
+            local_number = _format_phone_for_prompt(caller_number)
+            replace_value = local_number or caller_number
+            content = content.replace('{{caller_number}}', replace_value)
+            content = content.replace('{{system__caller_id}}', replace_value)
         # Provide UTC time if placeholder is present
         if '{{system__time_utc}}' in content:
             now_utc = datetime.now(timezone.utc).isoformat()
