@@ -10,6 +10,7 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
+from twilio.rest import Client as TwilioClient
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
@@ -189,6 +190,57 @@ async def send_usage_to_webhook(
 @app.get("/", response_class=JSONResponse)
 async def index_page():
     return {"message": "Twilio Media Stream Server is running!"}
+
+# Twilio REST credentials (for hangup endpoint)
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+
+def _get_twilio_client():
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        print("Twilio credentials not configured: set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN")
+        return None
+    try:
+        return TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    except Exception as e:
+        print(f"Error creating Twilio client: {e}")
+        return None
+
+@app.post("/colgar", response_class=JSONResponse)
+async def hangup_call(request: Request):
+    """Hang up an active call by CallSid (or most recent)."""
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        call_sid = body.get('call_sid') or request.query_params.get('call_sid')
+        if not call_sid:
+            if call_info_store:
+                call_sid = max(call_info_store.keys(), key=lambda k: call_info_store[k]['timestamp'])
+                print(f"/colgar: Using most recent CallSid {call_sid}")
+            else:
+                return JSONResponse({"ok": False, "error": "no_call_sid", "message": "No active calls to hang up"}, status_code=400)
+
+        client = _get_twilio_client()
+        if not client:
+            return JSONResponse({"ok": False, "error": "twilio_not_configured", "message": "Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN"}, status_code=500)
+
+        loop = asyncio.get_event_loop()
+
+        def _hangup_sync(cs):
+            return client.calls(cs).update(status='completed')
+
+        try:
+            call = await loop.run_in_executor(None, _hangup_sync, call_sid)
+            print(f"/colgar: Hung up call {call_sid} (status now: {getattr(call, 'status', 'unknown')})")
+            return {"ok": True, "call_sid": call_sid, "status": getattr(call, 'status', None) or 'completed'}
+        except Exception as e:
+            print(f"/colgar: Error hanging up {call_sid}: {e}")
+            return JSONResponse({"ok": False, "error": "twilio_error", "message": str(e), "call_sid": call_sid}, status_code=500)
+    except Exception as e:
+        print(f"/colgar: Unexpected error: {e}")
+        return JSONResponse({"ok": False, "error": "unexpected", "message": str(e)}, status_code=500)
 
 @app.api_route("/incoming-call", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
