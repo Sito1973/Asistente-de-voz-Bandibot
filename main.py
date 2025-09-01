@@ -290,8 +290,8 @@ async def handle_media_stream(websocket: WebSocket):
                 try:
                     async for openai_message in openai_ws:
                         response = json.loads(openai_message)
-                        if response['type'] in LOG_EVENT_TYPES:
-                            print(f"Received event: {response['type']}", response)
+                        #if response['type'] in LOG_EVENT_TYPES:
+                           # print(f"Received event: {response['type']}", response)
                         
                         # Track conversation_id and accumulate usage data
                         if response.get('type') == 'response.done':
