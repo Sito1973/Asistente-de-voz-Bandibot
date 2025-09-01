@@ -495,7 +495,7 @@ async def initialize_session(openai_ws, caller_number=None):
         }
     }
     print(f'Using voice: {VOICE}')
-    print('Sending session update:', json.dumps(session_update))
+   # print('Sending session update:', json.dumps(session_update))
     await openai_ws.send(json.dumps(session_update))
 
     # AI speaks first with initial greeting
