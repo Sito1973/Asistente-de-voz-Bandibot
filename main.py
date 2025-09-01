@@ -158,7 +158,7 @@ async def send_usage_to_webhook(
             "reason": reason,
             "call_info": {
                 "from_number": from_e164 or caller_number,
-                "to_number": to_e164 or called_number,
+                "to_number": called_number,
                 "from_number_local": from_local,
                 "to_number_local": to_local,
                 "call_sid": call_sid,
