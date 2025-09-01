@@ -4,6 +4,8 @@ import base64
 import asyncio
 import websockets
 import requests
+import aiohttp
+from aiohttp_retry import RetryClient, ExponentialRetry
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.websockets import WebSocketDisconnect
@@ -45,7 +47,11 @@ LOG_EVENT_TYPES = [
 SHOW_TIMING_MATH = False
 
 # Webhook configuration
-N8N_WEBHOOK_URL = "https://n8n.agentewhatsapp.co/webhook/consumoRealTimeBandidos"
+# Allow override by env var, fallback to current default
+N8N_WEBHOOK_URL = os.getenv(
+    'N8N_WEBHOOK_URL',
+    "https://n8n.agentewhatsapp.co/webhook/consumoRealTimeBandidos"
+)
 
 # Token pricing per 1M tokens (in USD)
 PRICING = {
@@ -88,8 +94,17 @@ def calculate_cost(usage_data):
     
     return round(total_cost, 6)
 
-async def send_usage_to_webhook(usage_data, total_cost, conversation_id, caller_number=None, called_number=None, call_sid=None):
-    """Send usage data and cost to N8N webhook."""
+async def send_usage_to_webhook(
+    usage_data,
+    total_cost,
+    conversation_id,
+    caller_number=None,
+    called_number=None,
+    call_sid=None,
+    status="complete",
+    reason=None,
+):
+    """Send usage data and cost to N8N webhook with retries and detailed logs."""
     try:
         payload = {
             "conversation_id": conversation_id,
@@ -97,20 +112,32 @@ async def send_usage_to_webhook(usage_data, total_cost, conversation_id, caller_
             "total_cost_usd": total_cost,
             "timestamp": asyncio.get_event_loop().time(),
             "pricing_model": PRICING,
+            "status": status,
+            "reason": reason,
             "call_info": {
                 "from_number": caller_number,
                 "to_number": called_number,
-                "call_sid": call_sid
-            }
+                "call_sid": call_sid,
+            },
         }
-        
+
         print(f"Sending webhook to: {N8N_WEBHOOK_URL}")
         print(f"Payload: {payload}")
-        
-        response = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        print(f"Usage data sent to webhook successfully. Status: {response.status_code}, Cost: ${total_cost}")
-        
+
+        retry_options = ExponentialRetry(attempts=3, start_timeout=1)
+        async with RetryClient(raise_for_status=False, retry_options=retry_options) as client:
+            async with client.post(N8N_WEBHOOK_URL, json=payload, timeout=10) as resp:
+                body = await resp.text()
+                if 200 <= resp.status < 300:
+                    print(
+                        f"Usage data sent to webhook successfully. "
+                        f"Status: {resp.status}, Cost (USD): {total_cost}"
+                    )
+                else:
+                    print(
+                        f"Webhook responded with non-2xx status: {resp.status}. "
+                        f"Body: {body}"
+                    )
     except Exception as e:
         print(f"Error sending usage data to webhook: {e}")
         import traceback
@@ -379,17 +406,36 @@ async def handle_media_stream(websocket: WebSocket):
                 print(f"Final usage data: {total_usage}")
                 print(f"Caller info: {caller_number}, {called_number}, {call_sid}")
                 
-                if conversation_id and total_usage.get('total_tokens', 0) > 0:
-                    total_cost = calculate_cost(total_usage)
-                    print(f"Sending final usage data to webhook: Cost ${total_cost}")
-                    try:
-                        await send_usage_to_webhook(total_usage, total_cost, conversation_id, caller_number, called_number, call_sid)
-                        print("Webhook sent successfully!")
-                    except Exception as webhook_error:
-                        print(f"Webhook send error: {webhook_error}")
-                else:
-                    print(f"Not sending webhook - conversation_id: {conversation_id}, tokens: {total_usage.get('total_tokens', 0)}")
-                    print(f"Reason: {'No conversation_id' if not conversation_id else 'No tokens used'}")
+                tokens = total_usage.get('total_tokens', 0)
+                total_cost = calculate_cost(total_usage) if tokens > 0 else 0.0
+                final_conversation_id = conversation_id or call_sid or 'unknown'
+
+                status = "complete" if (conversation_id and tokens > 0) else "incomplete"
+                reasons = []
+                if not conversation_id:
+                    reasons.append("no_conversation_id")
+                if tokens == 0:
+                    reasons.append("no_tokens_used")
+                reason_text = ",".join(reasons) if reasons else None
+
+                print(
+                    f"Dispatching webhook with status={status}. "
+                    f"Conversation ID: {final_conversation_id}, Tokens: {tokens}, Cost: ${total_cost}"
+                )
+                try:
+                    await send_usage_to_webhook(
+                        total_usage,
+                        total_cost,
+                        final_conversation_id,
+                        caller_number,
+                        called_number,
+                        call_sid,
+                        status=status,
+                        reason=reason_text,
+                    )
+                    print("Webhook dispatch finished (check status above).")
+                except Exception as webhook_error:
+                    print(f"Webhook send error: {webhook_error}")
                 print("=== WEBHOOK SEND BLOCK COMPLETED ===")
                 
                 # Clean up call info from store
