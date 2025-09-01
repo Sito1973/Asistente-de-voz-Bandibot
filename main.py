@@ -152,8 +152,8 @@ async def handle_incoming_call(request: Request):
     host = request.url.hostname
     connect = Connect()
     
-    # Use simple WebSocket URL since query params don't work with Twilio
-    websocket_url = f'wss://{host}/media-stream'
+    # Pass caller info via query params
+    websocket_url = f'wss://{host}/media-stream?caller={caller_number}&called={called_number}&callsid={call_sid}'
     print(f"WebSocket URL being sent to Twilio: {websocket_url}")
     
     connect.stream(url=websocket_url)
@@ -166,12 +166,12 @@ async def handle_media_stream(websocket: WebSocket):
     print("Client connected")
     await websocket.accept()
     
-    # Initialize with Unknown values - will be updated when stream starts
-    caller_number = 'Unknown'
-    called_number = 'Unknown' 
-    call_sid = 'Unknown'
+    # Get caller info from query parameters
+    caller_number = websocket.query_params.get('caller', 'Unknown')
+    called_number = websocket.query_params.get('called', 'Unknown')
+    call_sid = websocket.query_params.get('callsid', 'Unknown')
     
-    print("WebSocket connection established - waiting for stream start to get call info")
+    print(f"WebSocket connection established with caller info: {caller_number}, {called_number}, {call_sid}")
 
     # Connection specific state
     stream_sid = None
@@ -198,7 +198,7 @@ async def handle_media_stream(websocket: WebSocket):
         ) as openai_ws:
             print("Connected to OpenAI successfully!")
             await initialize_session(openai_ws, caller_number)
-            print("Session initialized, starting communication tasks...")
+            print(f"Session initialized with caller info ({caller_number}), starting communication tasks...")
             
             async def receive_from_twilio():
                 """Receive audio data from Twilio and send it to the OpenAI Realtime API."""
