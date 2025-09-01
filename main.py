@@ -272,6 +272,15 @@ async def handle_media_stream(websocket: WebSocket):
                             response_start_timestamp_twilio = None
                             latest_media_timestamp = 0
                             last_assistant_item = None
+                        elif data['event'] == 'stop':
+                            # Twilio indicates the media stream is ending
+                            print("Twilio media stream stop received; closing upstream and finishing receive loop")
+                            try:
+                                if openai_ws.state.name == 'OPEN':
+                                    await openai_ws.close()
+                            except Exception as e:
+                                print(f"Error closing OpenAI WS on stop: {e}")
+                            break
                         elif data['event'] == 'mark':
                             if mark_queue:
                                 mark_queue.pop(0)
