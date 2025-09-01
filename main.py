@@ -15,17 +15,26 @@ from datetime import datetime, timezone
 
 load_dotenv()
 
-def _format_phone_for_prompt(number: str, country_code: str = '57') -> str:
-    """Return local phone without leading country code (e.g., +57).
-    Keeps only digits; strips leading country code if length suggests E.164.
-    """
+def _local_digits(number: str) -> str:
+    """Extract local digits (last N digits), removing country code or extra leading digits."""
     if not number:
         return ''
     digits = ''.join(ch for ch in str(number) if ch.isdigit())
-    # If it looks like E.164 with country code, strip it
-    if digits.startswith(country_code) and len(digits) > 10:
-        digits = digits[len(country_code):]
+    if len(digits) >= LOCAL_NUMBER_LENGTH:
+        return digits[-LOCAL_NUMBER_LENGTH:]
     return digits
+
+def _normalize_e164(number: str, country_code: str = None) -> str:
+    """Normalize to E.164 with single country code and no duplicates."""
+    cc = (country_code or DEFAULT_COUNTRY_CODE).lstrip('+')
+    local = _local_digits(number)
+    if not local:
+        return ''
+    return f"+{cc}{local}"
+
+def _format_phone_for_prompt(number: str, country_code: str = None) -> str:
+    """Return local phone without country code using configured length."""
+    return _local_digits(number)
 
 def load_system_message(caller_number=None):
     """Load system message from text file and replace placeholders."""
@@ -58,6 +67,12 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 TEMPERATURE = float(os.getenv('TEMPERATURE', 0.8))
 VOICE = os.getenv('VOICE', 'cedar')
+# Phone normalization settings
+DEFAULT_COUNTRY_CODE = os.getenv('DEFAULT_COUNTRY_CODE', '57')
+try:
+    LOCAL_NUMBER_LENGTH = int(os.getenv('LOCAL_NUMBER_LENGTH', '10'))
+except Exception:
+    LOCAL_NUMBER_LENGTH = 10
 LOG_EVENT_TYPES = [
     'error', 'response.content.done', 'rate_limits.updated',
     'response.done', 'input_audio_buffer.committed',
@@ -126,6 +141,12 @@ async def send_usage_to_webhook(
 ):
     """Send usage data and cost to N8N webhook with retries and detailed logs."""
     try:
+        # Normalize phone numbers for webhook payload
+        from_e164 = _normalize_e164(caller_number)
+        to_e164 = _normalize_e164(called_number)
+        from_local = _local_digits(caller_number)
+        to_local = _local_digits(called_number)
+
         payload = {
             "conversation_id": conversation_id,
             "usage": usage_data,
@@ -135,8 +156,10 @@ async def send_usage_to_webhook(
             "status": status,
             "reason": reason,
             "call_info": {
-                "from_number": caller_number,
-                "to_number": called_number,
+                "from_number": from_e164 or caller_number,
+                "to_number": to_e164 or called_number,
+                "from_number_local": from_local,
+                "to_number_local": to_local,
                 "call_sid": call_sid,
             },
         }
