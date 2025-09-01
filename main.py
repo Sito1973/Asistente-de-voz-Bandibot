@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.websockets import WebSocketDisconnect
 from twilio.twiml.voice_response import VoiceResponse, Connect, Say, Stream
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -24,6 +25,11 @@ def load_system_message(caller_number=None):
         # Replace placeholders
         if caller_number:
             content = content.replace('{{caller_number}}', caller_number)
+            content = content.replace('{{system__caller_id}}', caller_number)
+        # Provide UTC time if placeholder is present
+        if '{{system__time_utc}}' in content:
+            now_utc = datetime.now(timezone.utc).isoformat()
+            content = content.replace('{{system__time_utc}}', now_utc)
             
         return content
     except FileNotFoundError:
@@ -266,6 +272,32 @@ async def handle_media_stream(websocket: WebSocket):
                                     called_number = call_info['to_number'] 
                                     call_sid = call_info['call_sid']
                                     print(f"Retrieved call info: from={caller_number}, to={called_number}, callsid={call_sid}")
+                                    # Update session instructions now that we have the real caller number
+                                    try:
+                                        updated_instructions = load_system_message(caller_number)
+                                        session_update = {
+                                            "type": "session.update",
+                                            "session": {
+                                                "type": "realtime",
+                                                "model": "gpt-realtime",
+                                                "output_modalities": ["audio"],
+                                                "audio": {
+                                                    "input": {
+                                                        "format": {"type": "audio/pcmu"},
+                                                        "turn_detection": {"type": "server_vad"}
+                                                    },
+                                                    "output": {
+                                                        "format": {"type": "audio/pcmu"},
+                                                        "voice": VOICE
+                                                    }
+                                                },
+                                                "instructions": updated_instructions,
+                                            }
+                                        }
+                                        await openai_ws.send(json.dumps(session_update))
+                                        print("Session instructions updated with caller_number.")
+                                    except Exception as e:
+                                        print(f"Error updating session with caller_number: {e}")
                                 else:
                                     print(f"Could not match stream {stream_sid} to any stored call info")
                             
