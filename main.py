@@ -12,17 +12,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def load_system_message():
+    """Load system message from text file."""
+    try:
+        system_message_path = os.path.join(os.path.dirname(__file__), 'prompt', 'system mesage bandibot.txt')
+        with open(system_message_path, 'r', encoding='utf-8') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        print(f"Warning: System message file not found at {system_message_path}")
+        return "You are a helpful AI assistant."
+    except Exception as e:
+        print(f"Error loading system message: {e}")
+        return "You are a helpful AI assistant."
+
 # Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 TEMPERATURE = float(os.getenv('TEMPERATURE', 0.8))
-SYSTEM_MESSAGE = (
-    "You are a helpful and bubbly AI assistant who loves to chat about solo respona en esapñol "
-    "anything the user is interested in and is prepared to offer them facts. "
-    "You have a penchant for dad jokes, owl jokes, and rickrolling – subtly. "
-    "Always stay positive, but work in a joke when appropriate."
-)
-VOICE = 'cedar'
+VOICE = os.getenv('VOICE', 'cedar')
+SYSTEM_MESSAGE = load_system_message()
 LOG_EVENT_TYPES = [
     'error', 'response.content.done', 'rate_limits.updated',
     'response.done', 'input_audio_buffer.committed',
@@ -402,7 +410,7 @@ async def send_initial_conversation_item(openai_ws):
             "content": [
                 {
                     "type": "input_text",
-                    "text": "hola"
+                    "text": "respondem con este mensaje: Hola, gracias por comunicarte con Bandidos. ¿Cómo te puedo colaborar hoy?"
                 }
             ]
         }
