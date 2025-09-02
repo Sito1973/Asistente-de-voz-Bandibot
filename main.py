@@ -88,6 +88,33 @@ N8N_WEBHOOK_URL = os.getenv(
     'N8N_WEBHOOK_URL',
     "https://n8n.agentewhatsapp.co/webhook/consumoRealTimeBandidos"
 )
+ORDER_WEBHOOK_URL = os.getenv('ORDER_WEBHOOK_URL')
+
+# Tools config path (JSON file with Realtime tools definitions)
+TOOLS_CONFIG_PATH = os.getenv(
+    'TOOLS_CONFIG_PATH',
+    os.path.join(os.path.dirname(__file__), 'prompt', 'tools.json')
+)
+
+def load_tools_config():
+    """Load Realtime tools definitions from external JSON file.
+    Accepts either an array (tools list) or an object with key 'tools'.
+    """
+    try:
+        with open(TOOLS_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict) and 'tools' in data and isinstance(data['tools'], list):
+            return data['tools']
+        if isinstance(data, list):
+            return data
+        print(f"Tools config at {TOOLS_CONFIG_PATH} is not a list or object with 'tools'; ignoring.")
+        return []
+    except FileNotFoundError:
+        print(f"No tools config found at {TOOLS_CONFIG_PATH}; proceeding without tools.")
+        return []
+    except Exception as e:
+        print(f"Error loading tools config {TOOLS_CONFIG_PATH}: {e}")
+        return []
 
 # Token pricing per 1M tokens (in USD)
 PRICING = {
@@ -186,6 +213,28 @@ async def send_usage_to_webhook(
         print(f"Error sending usage data to webhook: {e}")
         import traceback
         traceback.print_exc()
+
+async def handle_crear_direccion(args: dict, call_ctx: dict):
+    """Handle crear_direccion tool call. Optionally forwards to ORDER_WEBHOOK_URL."""
+    try:
+        payload = {
+            "tool": "crear_direccion",
+            "arguments": args,
+            "call_context": call_ctx,
+        }
+        print(f"[crear_direccion] Args: {args}")
+        if ORDER_WEBHOOK_URL:
+            retry_options = ExponentialRetry(attempts=3, start_timeout=1)
+            async with RetryClient(raise_for_status=False, retry_options=retry_options) as client:
+                async with client.post(ORDER_WEBHOOK_URL, json=payload, timeout=10) as resp:
+                    body = await resp.text()
+                    print(f"[crear_direccion] Forwarded to ORDER_WEBHOOK_URL -> {resp.status} {body}")
+        else:
+            print("[crear_direccion] ORDER_WEBHOOK_URL no configurado; solo se registró el payload.")
+        return {"ok": True, "received": args}
+    except Exception as e:
+        print(f"[crear_direccion] Error: {e}")
+        return {"ok": False, "error": str(e)}
 
 @app.get("/", response_class=JSONResponse)
 async def index_page():
@@ -418,12 +467,80 @@ async def handle_media_stream(websocket: WebSocket):
                 """Receive events from the OpenAI Realtime API, send audio back to Twilio."""
                 print("send_to_twilio: Starting...")
                 nonlocal stream_sid, last_assistant_item, response_start_timestamp_twilio, conversation_id, total_usage
+                current_fn = {"id": None, "name": None, "args": ""}
                 try:
                     async for openai_message in openai_ws:
                         response = json.loads(openai_message)
                         #if response['type'] in LOG_EVENT_TYPES:
                            # print(f"Received event: {response['type']}", response)
                         
+                        # Handle function-calling (Realtime tools)
+                        rtype = response.get('type', '')
+                        if 'function_call' in rtype:
+                            # Accumulate streamed arguments
+                            if 'arguments.delta' in rtype:
+                                # try to pick identifiers if present
+                                # different SDKs may send fields with different keys
+                                if 'call_id' in response:
+                                    current_fn_id = response.get('call_id')
+                                else:
+                                    current_fn_id = None
+                                if 'name' in response:
+                                    current_fn_name = response.get('name')
+                                else:
+                                    current_fn_name = None
+                                delta = response.get('delta') or response.get('arguments') or ''
+                                # initialize if empty
+                                if not current_fn["id"]:
+                                    current_fn["id"] = current_fn_id
+                                if not current_fn["name"]:
+                                    current_fn["name"] = current_fn_name
+                                current_fn['args'] += delta
+                                print(f"[tool] {current_fn['name'] or 'fn'} args += {delta}")
+                                continue
+                            # finalize on completion events
+                            if any(k in rtype for k in ['arguments.done', 'completed']) or rtype == 'response.function_call':
+                                fn_name = response.get('name') or current_fn['name']
+                                fn_id = response.get('call_id') or current_fn['id']
+                                args_text = response.get('arguments') or current_fn['args']
+                                print(f"[tool] finalize {fn_name} ({fn_id}) -> {args_text}")
+                                tool_result = {"ok": False, "error": "no_handler"}
+                                try:
+                                    parsed = json.loads(args_text) if isinstance(args_text, str) and args_text.strip() else {}
+                                except Exception as e:
+                                    print(f"[tool] JSON parse error: {e}; using raw text")
+                                    parsed = {"raw": args_text}
+
+                                call_ctx = {
+                                    "conversation_id": conversation_id,
+                                    "from_number": caller_number,
+                                    "to_number": called_number,
+                                    "call_sid": call_sid,
+                                }
+                                if fn_name == 'crear_direccion':
+                                    tool_result = await handle_crear_direccion(parsed, call_ctx)
+                                else:
+                                    print(f"[tool] Unknown function: {fn_name}")
+
+                                if fn_id:
+                                    try:
+                                        fn_output = {
+                                            "type": "conversation.item.create",
+                                            "item": {
+                                                "type": "function_call_output",
+                                                "call_id": fn_id,
+                                                "output": json.dumps(tool_result),
+                                            },
+                                        }
+                                        await openai_ws.send(json.dumps(fn_output))
+                                        await openai_ws.send(json.dumps({"type": "response.create"}))
+                                        print(f"[tool] Sent function_call_output for {fn_name}")
+                                    except Exception as e:
+                                        print(f"[tool] Error sending function_call_output: {e}")
+                                # reset buffer
+                                current_fn = {"id": None, "name": None, "args": ""}
+                                continue
+
                         # Track conversation_id and accumulate usage data
                         if response.get('type') == 'response.done':
                             response_data = response.get('response', {})
@@ -636,6 +753,7 @@ async def initialize_session(openai_ws, caller_number=None):
     # Load system message with caller number
     system_message_with_caller = load_system_message(caller_number)
     
+    tools_list = load_tools_config()
     session_update = {
         "type": "session.update",
         "session": {
@@ -652,6 +770,7 @@ async def initialize_session(openai_ws, caller_number=None):
                     "voice": VOICE
                 }
             },
+            "tools": tools_list,
             "instructions": system_message_with_caller,
         }
     }

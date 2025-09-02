@@ -1,0 +1,41 @@
+[
+  {
+    "type": "function",
+    "name": "crear_direccion",
+    "description": "Crea una dirección de cliente. Esta herramienta debe usarse cuando ya se tiene toda la informacion de ubicacion y de detalles del pedido del cliente, para proseguir con la toma del pedido, debes tener mucho cuidado en la direccion del cliente. Ser preciso extrayendo la direccion proporcionada, y los detalles e indicaciones ponerlos en indicaciones_direccion_cliente.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "nombre_cliente": {
+          "type": "string",
+          "description": "Nombre del cliente (obligatorio)"
+        },
+        "direccion_cliente": {
+          "type": "string",
+          "description": "Dirección del cliente (obligatorio), solo la direccion exacta TIENE que ser: ya sea nombre del edificio, unidad residencial, el nombre de la empresa o en el formato de Calle con Carrera y numero. Sin referencia de casa, bodega u oficina"
+        },
+        "indicaciones_direccion_cliente": {
+          "type": "string",
+          "description": "Comentarios adicionales sobre la dirección proporcionada por el cliente: número de casa/oficina/bodega, barrio y referencias para asegurar la entrega."
+        },
+        "ciudad_cliente": {
+          "type": "string",
+          "enum": ["Pereira", "Dosquebradas"],
+          "description": "Ciudad del cliente (obligatorio: Pereira, Dosquebradas)"
+        },
+        "tipo_pedido": {
+          "type": "string",
+          "enum": ["Recoger", "Domicilio"],
+          "description": "Tipo de pedido que solicita el cliente (obligatorio)"
+        }
+      },
+      "required": [
+        "nombre_cliente",
+        "direccion_cliente",
+        "indicaciones_direccion_cliente",
+        "ciudad_cliente",
+        "tipo_pedido"
+      ]
+    }
+  }
+]
